@@ -7526,6 +7526,18 @@ public class MessageObject {
         }
         CharSequence text = translated && messageOwner.translatedVoiceTranscription != null ? messageOwner.translatedVoiceTranscription.text : messageOwner.voiceTranscription;
         if (!TextUtils.isEmpty(text)) {
+            if (GeminiTranscribeHelper.isSummaryOpen(this)) {
+                String summary = GeminiTranscribeHelper.getVoiceSummary(this);
+                if (!TextUtils.isEmpty(summary)) {
+                    SpannableStringBuilder ssb = new SpannableStringBuilder(text);
+                    ssb.append("\n\n");
+                    int start = ssb.length();
+                    ssb.append("✨ Summary:\n");
+                    ssb.setSpan(new TypefaceSpan(AndroidUtilities.bold()), start, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    ssb.append(summary);
+                    text = ssb;
+                }
+            }
             text = Emoji.replaceEmoji(text, Theme.chat_msgTextPaint.getFontMetricsInt(), false);
         }
         return text;

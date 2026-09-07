@@ -34,6 +34,8 @@ import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.GeminiTranscribeHelper;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
@@ -214,7 +216,7 @@ public class TranscribeButton {
         boolean processClick, toOpen = !shouldBeOpen;
         if (!shouldBeOpen) {
             processClick = !loading;
-            if ((premium || canTranscribeTrial(parent.getMessageObject())) && parent.getMessageObject().isSent()) {
+            if (parent.getMessageObject() != null && parent.getMessageObject().isSent()) {
                 setLoading(true, true);
             }
         } else {
@@ -228,24 +230,10 @@ public class TranscribeButton {
         }
         pressed = false;
         if (processClick) {
-            if (!premium && toOpen) {
-                if (canTranscribeTrial(parent.getMessageObject()) || parent.getMessageObject() != null && parent.getMessageObject().messageOwner != null && !TextUtils.isEmpty(parent.getMessageObject().messageOwner.voiceTranscription)) {
-                    transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
-                } else {
-                    if (parent.getDelegate() != null) {
-                        if (MessagesController.getInstance(parent.currentAccount).transcribeAudioTrialWeeklyNumber > 0) {
-                            parent.getDelegate().needShowPremiumBulletin(3);
-                        } else {
-                            parent.getDelegate().needShowPremiumBulletin(0);
-                        }
-                    }
-                }
-            } else {
-                if (toOpen) {
-                    clickedToOpen = true;
-                }
-                transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
+            if (toOpen) {
+                clickedToOpen = true;
             }
+            transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
         }
     }
 
@@ -666,6 +654,7 @@ public class TranscribeButton {
 
     public static boolean isTranscribing(MessageObject messageObject) {
         return (
+            GeminiTranscribeHelper.isTranscribing(messageObject) ||
             (transcribeOperationsByDialogPosition != null && (transcribeOperationsByDialogPosition.containsValue(messageObject) || transcribeOperationsByDialogPosition.containsKey((Integer) reqInfoHash(messageObject)))) ||
             (transcribeOperationsById != null && messageObject != null && messageObject.messageOwner != null && transcribeOperationsById.containsKey(messageObject.messageOwner.voiceTranscriptionId))
         );
@@ -676,10 +665,8 @@ public class TranscribeButton {
             return;
         }
         int account = messageObject.currentAccount;
-        final long start = SystemClock.elapsedRealtime(), minDuration = 350;
-        TLRPC.InputPeer peer = MessagesController.getInstance(account).getInputPeer(messageObject.messageOwner.peer_id);
-        long dialogId = DialogObject.getPeerDialogId(peer);
-        int messageId = messageObject.messageOwner.id;
+        long dialogId = messageObject.getDialogId();
+        int messageId = messageObject.getId();
         if (open) {
             if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
                 TranscribeButton.openVideoTranscription(messageObject);
@@ -689,85 +676,42 @@ public class TranscribeButton {
                     NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) true, (Boolean) true);
                 });
             } else {
-                if (BuildVars.LOGS_ENABLED) {
-                    FileLog.d("sending Transcription request, msg_id=" + messageId + " dialog_id=" + dialogId);
-                }
-                TLRPC.TL_messages_transcribeAudio req = new TLRPC.TL_messages_transcribeAudio();
-                req.peer = peer;
-                req.msg_id = messageId;
                 if (transcribeOperationsByDialogPosition == null) {
                     transcribeOperationsByDialogPosition = new HashMap<>();
                 }
                 transcribeOperationsByDialogPosition.put((Integer) reqInfoHash(messageObject), messageObject);
-                int flags = 0;
-                if (!UserConfig.getInstance(account).isPremium()) {
-                    flags |= ConnectionsManager.RequestFlagDoNotWaitFloodWait;
-                }
-                ConnectionsManager.getInstance(account).sendRequest(req, (res, err) -> {
-                    String text;
-                    long id = 0;
-                    boolean isFinal = false;
-                    if (res instanceof TLRPC.TL_messages_transcribedAudio) {
-                        TLRPC.TL_messages_transcribedAudio r = (TLRPC.TL_messages_transcribedAudio) res;
-                        text = r.text;
-                        id = r.transcription_id;
-                        isFinal = !r.pending;
-                        if (TextUtils.isEmpty(text)) {
-                            text = !isFinal ? null : "";
+                TranscribeButton.openVideoTranscription(messageObject);
+                messageObject.messageOwner.voiceTranscriptionOpen = true;
+                messageObject.messageOwner.voiceTranscriptionFinal = false;
+
+                AndroidUtilities.runOnUIThread(() -> {
+                    NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject);
+                });
+
+                GeminiTranscribeHelper.transcribe(messageObject, new GeminiTranscribeHelper.Callback() {
+                    @Override
+                    public void onResult(String text) {
+                        finishTranscription(messageObject, 0, text != null ? text : "");
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        if (transcribeOperationsByDialogPosition != null) {
+                            transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
                         }
-                        if ((r.flags & 2) != 0) {
-                            MessagesController.getInstance(account).updateTranscribeAudioTrialCurrentNumber(r.trial_remains_num);
-                            MessagesController.getInstance(account).updateTranscribeAudioTrialCooldownUntil(r.trial_remains_until_date);
-                            AndroidUtilities.runOnUIThread(() -> {
-                                if (delegate != null) {
-                                    delegate.needShowPremiumBulletin(r.trial_remains_num > 0 ? 1 : 2);
-                                }
-                            });
-                        }
-                        if (transcribeOperationsById == null) {
-                            transcribeOperationsById = new HashMap<>();
-                        }
-                        transcribeOperationsById.put(id, messageObject);
-                        messageObject.messageOwner.voiceTranscriptionId = id;
-                    } else {
-                        if (err != null && err.text != null) {
-                            if (err.text.startsWith("FLOOD_WAIT_")) {
-                                MessagesController.getInstance(account).updateTranscribeAudioTrialCurrentNumber(0);
-                                MessagesController.getInstance(account).updateTranscribeAudioTrialCooldownUntil(ConnectionsManager.getInstance(account).getCurrentTime() + Utilities.parseInt(err.text));
-                                AndroidUtilities.runOnUIThread(() -> {
-                                    if (transcribeOperationsByDialogPosition != null) {
-                                        transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
-                                    }
-                                    if (delegate != null) {
-                                        delegate.needShowPremiumBulletin(3);
-                                    }
-                                    NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject);
-                                    NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateTranscriptionLock);
-                                });
-                                return;
+                        messageObject.messageOwner.voiceTranscriptionOpen = false;
+                        AndroidUtilities.runOnUIThread(() -> {
+                            NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) false, null);
+                            try {
+                                BulletinFactory.global().createErrorBulletin(LocaleController.getString(R.string.UnknownError)).show();
+                            } catch (Exception ignore) {
                             }
-                        }
-
-                        text = "";
-                        isFinal = true;
+                        });
                     }
-                    final String finalText = text;
-                    final long finalId = id;
-                    final long duration = SystemClock.elapsedRealtime() - start;
-                    TranscribeButton.openVideoTranscription(messageObject);
-                    messageObject.messageOwner.voiceTranscriptionOpen = true;
-                    messageObject.messageOwner.voiceTranscriptionFinal = isFinal;
-                    if (BuildVars.LOGS_ENABLED) {
-                        FileLog.d("Transcription request sent, received final=" + isFinal + " id=" + finalId + " text=" + finalText);
-                    }
-
-                    MessagesStorage.getInstance(account).updateMessageVoiceTranscription(dialogId, messageId, finalText, messageObject.messageOwner);
-                    if (isFinal) {
-                        AndroidUtilities.runOnUIThread(() -> finishTranscription(messageObject, finalId, finalText), Math.max(0, minDuration - duration));
-                    }
-                }, flags);
+                });
             }
         } else {
+            GeminiTranscribeHelper.cancel(messageObject);
             if (transcribeOperationsByDialogPosition != null) {
                 transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
             }
@@ -795,7 +739,10 @@ public class TranscribeButton {
             if (transcribeOperationsByDialogPosition != null) {
                 transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
             }
+            messageObject.messageOwner.voiceTranscription = text;
+            messageObject.messageOwner.voiceTranscriptionOpen = true;
             messageObject.messageOwner.voiceTranscriptionFinal = true;
+            TranscribeButton.openVideoTranscription(messageObject);
             MessagesStorage.getInstance(messageObject.currentAccount).updateMessageVoiceTranscription(messageObject.getDialogId(), messageObject.getId(), text, messageObject.messageOwner);
             AndroidUtilities.runOnUIThread(() -> {
                 NotificationCenter.getInstance(finalMessageObject.currentAccount).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, finalMessageObject, (Long) transcription_id, (String) text, (Boolean) true, (Boolean) true);
@@ -824,55 +771,18 @@ public class TranscribeButton {
     }
 
     public static boolean canTranscribeTrial(MessageObject messageObject) {
-        if (messageObject == null || messageObject.messageOwner == null) {
-            return false;
-        }
-        ConnectionsManager cc = ConnectionsManager.getInstance(messageObject.currentAccount);
-        MessagesController mc = MessagesController.getInstance(messageObject.currentAccount);
-        if (isFreeTranscribeInChat(messageObject)) {
-            return true;
-        }
-        if (mc.transcribeAudioTrialWeeklyNumber <= 0 || messageObject.getDuration() > mc.transcribeAudioTrialDurationMax) {
-            return false;
-        }
-        return mc.transcribeAudioTrialCooldownUntil == 0 || cc.getCurrentTime() > mc.transcribeAudioTrialCooldownUntil || mc.transcribeAudioTrialCurrentNumber > 0;
+        return true;
     }
 
     public static boolean isFreeTranscribeInChat(MessageObject messageObject) {
-        if (messageObject == null || messageObject.messageOwner == null) {
-            return false;
-        }
-        MessagesController mc = MessagesController.getInstance(messageObject.currentAccount);
-        TLRPC.Chat chat = mc.getChat(messageObject.getChatId());
-        return ChatObject.isMegagroup(chat) && chat.level >= mc.groupTranscribeLevelMin;
+        return true;
     }
 
     public static int getTranscribeTrialCount(int currentAccount) {
-        ConnectionsManager cc = ConnectionsManager.getInstance(currentAccount);
-        MessagesController mc = MessagesController.getInstance(currentAccount);
-        if (mc.transcribeAudioTrialWeeklyNumber <= 0) {
-            return 0;
-        }
-        if (mc.transcribeAudioTrialCooldownUntil == 0 || cc.getCurrentTime() > mc.transcribeAudioTrialCooldownUntil)
-            return mc.transcribeAudioTrialWeeklyNumber;
-        return mc.transcribeAudioTrialCurrentNumber;
+        return 999;
     }
 
     public static boolean showTranscribeLock(MessageObject messageObject) {
-        if (messageObject == null || messageObject.messageOwner == null) {
-            return false;
-        }
-        if (isFreeTranscribeInChat(messageObject)) {
-            return false;
-        }
-        if (!TextUtils.isEmpty(messageObject.messageOwner.voiceTranscription)) {
-            return false;
-        }
-        ConnectionsManager cc = ConnectionsManager.getInstance(messageObject.currentAccount);
-        MessagesController mc = MessagesController.getInstance(messageObject.currentAccount);
-        if (UserConfig.getInstance(messageObject.currentAccount).isPremium()) {
-            return false;
-        }
-        return mc.transcribeAudioTrialCooldownUntil != 0 && cc.getCurrentTime() <= mc.transcribeAudioTrialCooldownUntil && mc.transcribeAudioTrialCurrentNumber <= 0;
+        return false;
     }
 }

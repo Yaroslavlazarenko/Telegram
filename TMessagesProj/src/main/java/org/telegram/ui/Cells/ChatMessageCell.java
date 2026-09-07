@@ -214,6 +214,8 @@ import org.telegram.ui.Components.TimerParticles;
 import org.telegram.ui.Components.TopicButton;
 import org.telegram.ui.Components.TopicSeparator;
 import org.telegram.ui.Components.TornEdge;
+import org.telegram.messenger.GeminiTranscribeHelper;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.TranscribeButton;
 import org.telegram.ui.Components.TypefaceSpan;
 import org.telegram.ui.Components.URLSpanBotCommand;
@@ -1399,6 +1401,12 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private boolean useTranscribeButton;
     public TranscribeButton transcribeButton;
     private float transcribeX, transcribeY;
+
+    private final RectF summaryButtonRect = new RectF();
+    private boolean summaryButtonPressed;
+    private boolean drawSummaryButton;
+    private Paint summaryButtonBgPaint;
+    private TextPaint summaryButtonTextPaint;
 
     private StaticLayout durationLayout;
     private double lastTime;
@@ -3080,6 +3088,105 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     private boolean checkTranscribeButtonMotionEvent(MotionEvent event) {
         return useTranscribeButton && (!isPlayingRound || getVideoTranscriptionProgress() > 0 || wasTranscriptionOpen) && transcribeButton != null && transcribeButton.onTouch(event.getAction(), getEventX(event), getEventY(event));
+    }
+
+    private boolean checkVoiceSummaryButtonMotionEvent(MotionEvent event) {
+        if (!drawSummaryButton || summaryButtonRect == null) {
+            return false;
+        }
+        float x = getEventX(event);
+        float y = getEventY(event);
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            if (summaryButtonRect.contains(x, y)) {
+                summaryButtonPressed = true;
+                invalidate();
+                return true;
+            }
+        } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
+            if (summaryButtonPressed && !summaryButtonRect.contains(x, y)) {
+                summaryButtonPressed = false;
+                invalidate();
+            }
+        } else if (event.getAction() == MotionEvent.ACTION_UP) {
+            if (summaryButtonPressed) {
+                summaryButtonPressed = false;
+                playSoundEffect(SoundEffectConstants.CLICK);
+                invalidate();
+                onSummaryButtonClicked();
+                return true;
+            }
+        } else if (event.getAction() == MotionEvent.ACTION_CANCEL) {
+            if (summaryButtonPressed) {
+                summaryButtonPressed = false;
+                invalidate();
+            }
+        }
+        return false;
+    }
+
+    private void onSummaryButtonClicked() {
+        if (currentMessageObject == null) {
+            return;
+        }
+        GeminiTranscribeHelper.toggleSummary(currentMessageObject, new GeminiTranscribeHelper.SummaryCallback() {
+            @Override
+            public void onSummaryUpdated() {
+                invalidate();
+            }
+
+            @Override
+            public void onError(String error) {
+                invalidate();
+                try {
+                    BulletinFactory.global().createErrorBulletin(error != null ? error : LocaleController.getString(R.string.UnknownError)).show();
+                } catch (Exception ignore) {}
+            }
+        });
+        invalidate();
+    }
+
+    private void drawVoiceSummaryButton(Canvas canvas) {
+        if (!drawSummaryButton || captionLayout == null || currentMessageObject == null) {
+            return;
+        }
+        if (summaryButtonBgPaint == null) {
+            summaryButtonBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            summaryButtonTextPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            summaryButtonTextPaint.setTypeface(AndroidUtilities.bold());
+        }
+        summaryButtonTextPaint.setTextSize(dp(11.5f));
+
+        String text;
+        if (GeminiTranscribeHelper.isSummaryLoading(currentMessageObject)) {
+            text = "✨ ...";
+        } else if (GeminiTranscribeHelper.isSummaryOpen(currentMessageObject)) {
+            text = "✨ Hide";
+        } else {
+            text = "✨ Summary";
+        }
+
+        float textWidth = summaryButtonTextPaint.measureText(text);
+        float btnWidth = textWidth + dp(18);
+        float btnHeight = dp(24);
+
+        float right = getBackgroundDrawableRight() - dp(12) - (currentMessageObject.isOutOwner() ? dp(6) : 0);
+        float left = right - btnWidth;
+        float top = captionY + captionLayout.textHeight() + dp(4);
+        float bottom = top + btnHeight;
+        summaryButtonRect.set(left, top, right, bottom);
+
+        int bgColor = getThemedColor(currentMessageObject.isOutOwner() ? Theme.key_chat_outReactionButtonBackground : Theme.key_chat_inReactionButtonBackground);
+        if (summaryButtonPressed) {
+            bgColor = ColorUtils.blendARGB(bgColor, 0xff000000, 0.15f);
+        }
+        summaryButtonBgPaint.setColor(bgColor);
+        canvas.drawRoundRect(summaryButtonRect, dp(12), dp(12), summaryButtonBgPaint);
+
+        int textColor = getThemedColor(currentMessageObject.isOutOwner() ? Theme.key_chat_outReactionButtonText : Theme.key_chat_inReactionButtonText);
+        summaryButtonTextPaint.setColor(textColor);
+        Paint.FontMetricsInt fm = summaryButtonTextPaint.getFontMetricsInt();
+        float textY = summaryButtonRect.centerY() - (fm.descent + fm.ascent) / 2f;
+        canvas.drawText(text, summaryButtonRect.centerX() - textWidth / 2f, textY, summaryButtonTextPaint);
     }
 
     private boolean checkLinkPreviewMotionEvent(MotionEvent event) {
@@ -5004,6 +5111,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             result = checkSponsoredCloseMotionEvent(event);
         }
         if (!result) {
+            result = checkVoiceSummaryButtonMotionEvent(event);
+        }
+        if (!result) {
             result = checkCaptionMotionEvent(event);
         }
         if (!result) {
@@ -6793,7 +6903,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             }
         }
         accessibilityText = null;
-        if (drawCommentButton || useTranscribeButton || drawSideButton == 3 && !((hasDiscussion && messageObject.isLinkedToChat(linkedChatId) || isRepliesChat) && (currentPosition == null || currentPosition.siblingHeights == null && (currentPosition.flags & MessageObject.POSITION_FLAG_BOTTOM) != 0 || currentPosition.siblingHeights != null && (currentPosition.flags & MessageObject.POSITION_FLAG_TOP) == 0))) {
+        if (drawSummaryButton || drawCommentButton || useTranscribeButton || drawSideButton == 3 && !((hasDiscussion && messageObject.isLinkedToChat(linkedChatId) || isRepliesChat) && (currentPosition == null || currentPosition.siblingHeights == null && (currentPosition.flags & MessageObject.POSITION_FLAG_BOTTOM) != 0 || currentPosition.siblingHeights != null && (currentPosition.flags & MessageObject.POSITION_FLAG_TOP) == 0))) {
             dataChanged = true;
         }
         if (!messageChanged && messageObject.isDice()) {
@@ -7127,6 +7237,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             drawName = false;
             useSeekBarWaveform = false;
             useTranscribeButton = false;
+            drawSummaryButton = false;
             drawInstantView = false;
             drawInstantViewType = 0;
             instantViewTypeIsGiftAuction = null;
@@ -10632,6 +10743,20 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                                 captionHeight += dp(10);
                                 totalHeight += dp(10);
                             }
+                            drawSummaryButton = (
+                                currentMessageObject != null &&
+                                (currentMessageObject.isVoice() || currentMessageObject.isRoundVideo()) &&
+                                currentMessageObject.isVoiceTranscriptionOpen() &&
+                                currentMessageObject.messageOwner != null &&
+                                currentMessageObject.messageOwner.voiceTranscriptionFinal &&
+                                !TextUtils.isEmpty(currentMessageObject.messageOwner.voiceTranscription)
+                            );
+                            if (drawSummaryButton) {
+                                totalHeight += dp(28);
+                                if (captionLayout != null) {
+                                    captionHeight += dp(28);
+                                }
+                            }
                             if (currentMessageObject.type != MessageObject.TYPE_POLL && (reactionsLayoutInBubble.isEmpty || reactionsLayoutInBubble.isSmall) && (currentPosition == null || (currentPosition.flags & captionFlag()) != 0)) {
                                 int timeWidthTotal = timeWidth + (messageObject.isOutOwner() ? dp(20) : 0) + getExtraTimeX();
                                 if (width2 - dp(8) - lastCaptionLineWidth < timeWidthTotal || hasFactCheck) {
@@ -12657,30 +12782,18 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             !currentMessageObject.isRepostPreview &&
             (!currentMessageObject.isOutOwner() || currentMessageObject.isSent()) &&
             (
-                UserConfig.getInstance(currentAccount).isPremium()
-                ||
-                TranscribeButton.isFreeTranscribeInChat(currentMessageObject)
-                ||
-                MessagesController.getInstance(currentAccount).transcribeAudioTrialWeeklyNumber > 0 &&
-                currentMessageObject.getDuration() <= MessagesController.getInstance(currentAccount).transcribeAudioTrialDurationMax && (
-                    currentMessageObject.messageOwner != null && (
-                        !TextUtils.isEmpty(currentMessageObject.messageOwner.voiceTranscription) ||
-                        currentMessageObject.messageOwner.voiceTranscriptionFinal
-                    ) ||
-                    TranscribeButton.canTranscribeTrial(currentMessageObject) || true
-                )
-                ||
-                MessagesController.getInstance(currentAccount).transcribeAudioTrialWeeklyNumber <= 0 &&
-                !MessagesController.getInstance(currentAccount).premiumFeaturesBlocked() &&
-                !MessagesController.getInstance(currentAccount).didPressTranscribeButtonEnough() && !currentMessageObject.isOutOwner() && (
-                    currentMessageObject.messageOwner != null && currentMessageObject.messageOwner.voiceTranscriptionForce ||
-                    currentMessageObject.getDuration() >= 60
-                )
-            ) && (
                 currentMessageObject.isVoice() && useSeekBarWaveform ||
                 currentMessageObject.isRoundVideo()
             ) && currentMessageObject.messageOwner != null && !(MessageObject.getMedia(currentMessageObject.messageOwner) instanceof TLRPC.TL_messageMediaWebPage) &&
             (currentMessageObject.messageOwner.media == null || currentMessageObject.messageOwner.media.ttl_seconds == 0)
+        );
+        drawSummaryButton = (
+            currentMessageObject != null &&
+            (currentMessageObject.isVoice() || currentMessageObject.isRoundVideo()) &&
+            currentMessageObject.isVoiceTranscriptionOpen() &&
+            currentMessageObject.messageOwner != null &&
+            currentMessageObject.messageOwner.voiceTranscriptionFinal &&
+            !TextUtils.isEmpty(currentMessageObject.messageOwner.voiceTranscription)
         );
         updateSeekBarWaveformWidth(null);
     }
@@ -14940,6 +15053,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             drawCaptionLayout(canvas, false, 1f);
             // drawCommentLayout(canvas, 1f); // not needed because it is already called by drawCaptionLayout
             drawReactionsLayout(canvas, 1f, null);
+            if (drawSummaryButton) {
+                drawVoiceSummaryButton(canvas);
+            }
         }
 
         if (currentMessagesGroup == null) {
