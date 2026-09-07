@@ -8,23 +8,19 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
-import androidx.recyclerview.widget.RecyclerView;
+import androidx.core.widget.NestedScrollView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AntiDeleteHelper;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
 
 import java.util.ArrayList;
 
-public class MessageEditHistoryBottomSheet extends BottomSheetWithRecyclerListView {
-
-    private final MessageObject messageObject;
-    private final ArrayList<AntiDeleteHelper.EditEntry> history;
-    private UniversalAdapter adapter;
+public class MessageEditHistoryBottomSheet extends BottomSheet {
 
     public static void show(BaseFragment fragment, MessageObject messageObject) {
         if (fragment == null || fragment.getContext() == null || messageObject == null) {
@@ -35,38 +31,15 @@ public class MessageEditHistoryBottomSheet extends BottomSheetWithRecyclerListVi
     }
 
     public MessageEditHistoryBottomSheet(Context context, BaseFragment fragment, MessageObject messageObject) {
-        super(context, fragment, false, false, false, false, ActionBarType.SLIDING, fragment != null ? fragment.getResourceProvider() : null);
-        this.messageObject = messageObject;
-        if (messageObject != null) {
-            this.history = AntiDeleteHelper.getInstance().getEditHistory(messageObject.currentAccount, messageObject.getDialogId(), messageObject.getId());
-        } else {
-            this.history = new ArrayList<>();
-        }
-        topPadding = 0.25f;
-        setShowHandle(true);
-        fixNavigationBar();
-        if (adapter != null) {
-            adapter.update(false);
-        }
-    }
+        super(context, false, fragment != null ? fragment.getResourceProvider() : null);
+        setTitle("Edit History", true);
 
-    @Override
-    protected CharSequence getTitle() {
-        return "Edit History";
-    }
+        ArrayList<AntiDeleteHelper.EditEntry> history = AntiDeleteHelper.getInstance().getEditHistory(messageObject.currentAccount, messageObject.getDialogId(), messageObject.getId());
 
-    @Override
-    protected RecyclerListView.SelectionAdapter createAdapter(RecyclerListView listView) {
-        adapter = new UniversalAdapter(listView, getContext(), currentAccount, 0, this::fillItems, resourcesProvider);
-        return adapter;
-    }
-
-    private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
-        if (messageObject == null) {
-            return;
-        }
-
-        items.add(UItem.asHeader("Message Versions"));
+        NestedScrollView scrollView = new NestedScrollView(context);
+        LinearLayout linearLayout = new LinearLayout(context);
+        linearLayout.setOrientation(LinearLayout.VERTICAL);
+        linearLayout.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(12), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
 
         // Current Version
         CharSequence currentText = messageObject.messageText;
@@ -78,54 +51,71 @@ public class MessageEditHistoryBottomSheet extends BottomSheetWithRecyclerListVi
         }
         int editDate = messageObject.messageOwner != null ? messageObject.messageOwner.edit_date : 0;
         String currentDateStr = editDate != 0 ? LocaleController.formatDateAudio(editDate, true) : "Current";
-        items.add(UItem.asFullyCustom(new VersionCell(getContext(), "Current: " + currentDateStr, currentText, resourcesProvider)));
+        linearLayout.addView(createVersionCard(context, "Current: " + currentDateStr, currentText, fragment));
 
         // Previous Versions (reversed so most recent edit is top)
         if (history != null && !history.isEmpty()) {
             for (int i = history.size() - 1; i >= 0; i--) {
                 AntiDeleteHelper.EditEntry entry = history.get(i);
                 String dateStr = entry.date != 0 ? LocaleController.formatDateAudio(entry.date, true) : "Version " + (i + 1);
-                items.add(UItem.asFullyCustom(new VersionCell(getContext(), dateStr, entry.text, resourcesProvider)));
+                linearLayout.addView(createVersionCard(context, dateStr, entry.text, fragment));
             }
+        } else {
+            TextView emptyText = new TextView(context);
+            emptyText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            emptyText.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
+            emptyText.setText("No previous edits recorded yet. Edits made after this point will be saved here.");
+            emptyText.setPadding(0, AndroidUtilities.dp(8), 0, AndroidUtilities.dp(8));
+            linearLayout.addView(emptyText);
         }
 
-        items.add(UItem.asShadow("Tap any version to copy text to clipboard."));
+        TextView hint = new TextView(context);
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        hint.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
+        hint.setText("Tap any version to copy text to clipboard.");
+        hint.setPadding(0, AndroidUtilities.dp(12), 0, 0);
+        linearLayout.addView(hint);
+
+        scrollView.addView(linearLayout);
+        setCustomView(scrollView);
     }
 
-    private class VersionCell extends FrameLayout {
-        public VersionCell(@NonNull Context context, String headerText, CharSequence bodyText, Theme.ResourcesProvider resourcesProvider) {
-            super(context);
-            setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(10), AndroidUtilities.dp(16), AndroidUtilities.dp(10));
-            setBackground(Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), 8, 8));
+    private View createVersionCard(Context context, String headerText, CharSequence bodyText, BaseFragment fragment) {
+        FrameLayout card = new FrameLayout(context);
+        card.setPadding(AndroidUtilities.dp(14), AndroidUtilities.dp(10), AndroidUtilities.dp(14), AndroidUtilities.dp(10));
+        card.setBackground(Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), 10, 10));
 
-            LinearLayout layout = new LinearLayout(context);
-            layout.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
 
-            TextView header = new TextView(context);
-            header.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            header.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueHeader, resourcesProvider));
-            header.setTypeface(AndroidUtilities.bold());
-            header.setText(headerText);
-            layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 4));
+        TextView header = new TextView(context);
+        header.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+        header.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueHeader, resourcesProvider));
+        header.setTypeface(AndroidUtilities.bold());
+        header.setText(headerText);
+        content.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 4));
 
-            TextView body = new TextView(context);
-            body.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-            body.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
-            body.setText(bodyText);
-            body.setTextIsSelectable(false);
-            layout.addView(body, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        TextView body = new TextView(context);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        body.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
+        body.setText(bodyText);
+        body.setTextIsSelectable(false);
+        content.addView(body, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-            addView(layout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        card.addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-            setOnClickListener(v -> {
-                if (AndroidUtilities.addToClipboard(bodyText)) {
-                    if (getBaseFragment() != null) {
-                        BulletinFactory.of(getBaseFragment()).createCopyBulletin("Text copied to clipboard").show();
-                    } else {
-                        BulletinFactory.global().createCopyBulletin("Text copied to clipboard").show();
-                    }
+        card.setOnClickListener(v -> {
+            if (AndroidUtilities.addToClipboard(bodyText)) {
+                if (fragment != null) {
+                    BulletinFactory.of(fragment).createCopyBulletin("Text copied to clipboard").show();
+                } else {
+                    BulletinFactory.global().createCopyBulletin("Text copied to clipboard").show();
                 }
-            });
-        }
+            }
+        });
+
+        LinearLayout.LayoutParams lp = LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 8);
+        card.setLayoutParams(lp);
+        return card;
     }
 }

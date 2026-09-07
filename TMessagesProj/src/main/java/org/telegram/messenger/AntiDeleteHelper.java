@@ -38,41 +38,66 @@ public class AntiDeleteHelper {
         }
     }
 
-    private final DatabaseHelper dbHelper;
+    private DatabaseHelper dbHelper;
     private final ConcurrentHashMap<String, Boolean> deletedCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ArrayList<EditEntry>> editsCache = new ConcurrentHashMap<>();
 
     private AntiDeleteHelper() {
-        dbHelper = new DatabaseHelper(ApplicationLoader.applicationContext);
-        loadDeletedCache();
+        if (ApplicationLoader.applicationContext != null) {
+            dbHelper = new DatabaseHelper(ApplicationLoader.applicationContext);
+            loadDeletedCache();
+        }
+    }
+
+    private synchronized DatabaseHelper getDbHelper() {
+        if (dbHelper == null && ApplicationLoader.applicationContext != null) {
+            dbHelper = new DatabaseHelper(ApplicationLoader.applicationContext);
+            loadDeletedCache();
+        }
+        return dbHelper;
     }
 
     private static SharedPreferences getPreferences() {
+        if (ApplicationLoader.applicationContext == null) {
+            return null;
+        }
         return ApplicationLoader.applicationContext.getSharedPreferences("anti_delete_settings", Context.MODE_PRIVATE);
     }
 
     public boolean isAntiDeleteEnabled() {
-        return getPreferences().getBoolean("enabled", true);
+        SharedPreferences prefs = getPreferences();
+        return prefs == null || prefs.getBoolean("enabled", true);
     }
 
     public void setAntiDeleteEnabled(boolean enabled) {
-        getPreferences().edit().putBoolean("enabled", enabled).apply();
+        SharedPreferences prefs = getPreferences();
+        if (prefs != null) {
+            prefs.edit().putBoolean("enabled", enabled).apply();
+        }
     }
 
     public boolean isEditHistoryEnabled() {
-        return getPreferences().getBoolean("edit_history_enabled", true);
+        SharedPreferences prefs = getPreferences();
+        return prefs == null || prefs.getBoolean("edit_history_enabled", true);
     }
 
     public void setEditHistoryEnabled(boolean enabled) {
-        getPreferences().edit().putBoolean("edit_history_enabled", enabled).apply();
+        SharedPreferences prefs = getPreferences();
+        if (prefs != null) {
+            prefs.edit().putBoolean("edit_history_enabled", enabled).apply();
+        }
     }
 
     public boolean isEditNotificationEnabled() {
-        return getPreferences().getBoolean("edit_notification_enabled", true);
+        SharedPreferences prefs = getPreferences();
+        return prefs == null || prefs.getBoolean("edit_notification_enabled", true);
     }
 
     public void setEditNotificationEnabled(boolean enabled) {
-        getPreferences().edit().putBoolean("edit_notification_enabled", enabled).apply();
+        SharedPreferences prefs = getPreferences();
+        if (prefs != null) {
+            prefs.edit().putBoolean("edit_notification_enabled", enabled).apply();
+        }
     }
 
     private String getMessageKey(int account, long dialogId, int messageId) {
@@ -82,7 +107,11 @@ public class AntiDeleteHelper {
     private void loadDeletedCache() {
         Utilities.globalQueue.postRunnable(() -> {
             try {
-                SQLiteDatabase db = dbHelper.getReadableDatabase();
+                DatabaseHelper helper = getDbHelper();
+                if (helper == null) {
+                    return;
+                }
+                SQLiteDatabase db = helper.getReadableDatabase();
                 Cursor cursor = db.query("deleted_messages", new String[]{"account", "dialog_id", "message_id"}, null, null, null, null, null);
                 if (cursor != null) {
                     while (cursor.moveToNext()) {
@@ -118,10 +147,17 @@ public class AntiDeleteHelper {
         }
         for (int mid : messageIds) {
             deletedCache.put(getMessageKey(account, dialogId, mid), Boolean.TRUE);
+            if (dialogId != 0) {
+                deletedCache.put(getMessageKey(account, 0, mid), Boolean.TRUE);
+            }
         }
         Utilities.globalQueue.postRunnable(() -> {
             try {
-                SQLiteDatabase db = dbHelper.getWritableDatabase();
+                DatabaseHelper helper = getDbHelper();
+                if (helper == null) {
+                    return;
+                }
+                SQLiteDatabase db = helper.getWritableDatabase();
                 db.beginTransaction();
                 try {
                     int currentTime = (int) (System.currentTimeMillis() / 1000);
@@ -156,7 +192,11 @@ public class AntiDeleteHelper {
         }
         Utilities.globalQueue.postRunnable(() -> {
             try {
-                SQLiteDatabase db = dbHelper.getWritableDatabase();
+                DatabaseHelper helper = getDbHelper();
+                if (helper == null) {
+                    return;
+                }
+                SQLiteDatabase db = helper.getWritableDatabase();
                 for (int mid : messageIds) {
                     db.delete("deleted_messages", "account = ? AND (dialog_id = ? OR dialog_id = 0) AND message_id = ?",
                             new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(mid)});
@@ -195,7 +235,11 @@ public class AntiDeleteHelper {
 
         Utilities.globalQueue.postRunnable(() -> {
             try {
-                SQLiteDatabase db = dbHelper.getWritableDatabase();
+                DatabaseHelper helper = getDbHelper();
+                if (helper == null) {
+                    return;
+                }
+                SQLiteDatabase db = helper.getWritableDatabase();
                 ContentValues cv = new ContentValues();
                 cv.put("account", account);
                 cv.put("dialog_id", dialogId);
@@ -222,7 +266,11 @@ public class AntiDeleteHelper {
             }
         }
         try {
-            SQLiteDatabase db = dbHelper.getReadableDatabase();
+            DatabaseHelper helper = getDbHelper();
+            if (helper == null) {
+                return false;
+            }
+            SQLiteDatabase db = helper.getReadableDatabase();
             Cursor cursor = db.rawQuery("SELECT 1 FROM message_edits WHERE account = ? AND (dialog_id = ? OR dialog_id = 0) AND message_id = ? LIMIT 1",
                     new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(messageId)});
             boolean has = false;
@@ -252,7 +300,11 @@ public class AntiDeleteHelper {
 
         ArrayList<EditEntry> result = new ArrayList<>();
         try {
-            SQLiteDatabase db = dbHelper.getReadableDatabase();
+            DatabaseHelper helper = getDbHelper();
+            if (helper == null) {
+                return result;
+            }
+            SQLiteDatabase db = helper.getReadableDatabase();
             Cursor cursor = db.rawQuery("SELECT date, text FROM message_edits WHERE account = ? AND (dialog_id = ? OR dialog_id = 0) AND message_id = ? ORDER BY date ASC",
                     new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(messageId)});
             if (cursor != null) {

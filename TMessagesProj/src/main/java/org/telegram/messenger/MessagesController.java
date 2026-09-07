@@ -18851,7 +18851,9 @@ public class MessagesController extends BaseController implements NotificationCe
                             obj.remoteDeleted = true;
                         }
                     }
-                    getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, update.messages, 0L, false);
+                    AndroidUtilities.runOnUIThread(() -> {
+                        getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, update.messages, 0L, false);
+                    });
                 } else {
                     if (deletedMessages == null) {
                         deletedMessages = new LongSparseArray<>();
@@ -19391,7 +19393,9 @@ public class MessagesController extends BaseController implements NotificationCe
                             }
                         }
                     }
-                    getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, update.messages, update.channel_id, false);
+                    AndroidUtilities.runOnUIThread(() -> {
+                        getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, update.messages, update.channel_id, false);
+                    });
                 } else {
                     if (deletedMessages == null) {
                         deletedMessages = new LongSparseArray<>();
