@@ -8,6 +8,7 @@ import android.view.View;
 import android.widget.LinearLayout;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.AntiDeleteHelper;
 import org.telegram.messenger.GeminiTranscribeHelper;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
@@ -27,15 +28,18 @@ public class SttSettingsActivity extends UniversalFragment {
     private static final int ITEM_API_KEY = 2;
     private static final int ITEM_MODEL = 3;
     private static final int ITEM_RESET = 4;
+    private static final int ITEM_ANTI_DELETE = 5;
+    private static final int ITEM_EDIT_HISTORY = 6;
+    private static final int ITEM_EDIT_NOTIFY = 7;
 
     @Override
     protected CharSequence getTitle() {
-        return "Speech Recognition (STT)";
+        return "STT & Anti-Delete";
     }
 
     @Override
     protected void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
-        items.add(UItem.asHeader("AI Voice Transcription"));
+        items.add(UItem.asHeader("AI Voice Transcription (STT)"));
 
         String baseUrl = GeminiTranscribeHelper.getBaseUrl();
         items.add(UItem.asSettingsCell(ITEM_BASE_URL, "Base URL", baseUrl));
@@ -56,8 +60,14 @@ public class SttSettingsActivity extends UniversalFragment {
 
         items.add(UItem.asShadow("Configure the AI endpoint and API key used for transcribing and summarizing voice messages."));
 
-        items.add(UItem.asButton(ITEM_RESET, "Reset to Defaults").red());
+        items.add(UItem.asButton(ITEM_RESET, "Reset STT to Defaults").red());
         items.add(UItem.asShadow("Reset Base URL and Model to default Google Gemini endpoints."));
+
+        items.add(UItem.asHeader("Chat Protection"));
+        items.add(UItem.asCheck(ITEM_ANTI_DELETE, "Anti-Delete Messages").setChecked(AntiDeleteHelper.getInstance().isAntiDeleteEnabled()));
+        items.add(UItem.asCheck(ITEM_EDIT_HISTORY, "Message Edit History").setChecked(AntiDeleteHelper.getInstance().isEditHistoryEnabled()));
+        items.add(UItem.asCheck(ITEM_EDIT_NOTIFY, "Notify on Message Edit").setChecked(AntiDeleteHelper.getInstance().isEditNotificationEnabled()));
+        items.add(UItem.asShadow("Prevent incoming messages from being deleted when removed by another user, store previous versions of edited messages, and receive notifications when a message is edited."));
     }
 
     @Override
@@ -102,6 +112,21 @@ public class SttSettingsActivity extends UniversalFragment {
             });
             builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
             showDialog(builder.create());
+        } else if (item.id == ITEM_ANTI_DELETE) {
+            AntiDeleteHelper.getInstance().setAntiDeleteEnabled(!AntiDeleteHelper.getInstance().isAntiDeleteEnabled());
+            if (listView != null && listView.adapter != null) {
+                listView.adapter.update(true);
+            }
+        } else if (item.id == ITEM_EDIT_HISTORY) {
+            AntiDeleteHelper.getInstance().setEditHistoryEnabled(!AntiDeleteHelper.getInstance().isEditHistoryEnabled());
+            if (listView != null && listView.adapter != null) {
+                listView.adapter.update(true);
+            }
+        } else if (item.id == ITEM_EDIT_NOTIFY) {
+            AntiDeleteHelper.getInstance().setEditNotificationEnabled(!AntiDeleteHelper.getInstance().isEditNotificationEnabled());
+            if (listView != null && listView.adapter != null) {
+                listView.adapter.update(true);
+            }
         }
     }
 

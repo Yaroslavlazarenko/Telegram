@@ -1248,6 +1248,7 @@ public class ChatActivity extends BaseFragment implements
 
     public final static int OPTION_VIEW_STATISTICS = 115;
     public final static int OPTION_WELCOME_REVERT = 116;
+    public final static int OPTION_EDIT_HISTORY = 117;
 
     private final static int[] allowedNotificationsDuringChatListAnimations = new int[]{
             NotificationCenter.messagesRead,
@@ -33780,6 +33781,12 @@ public class ChatActivity extends BaseFragment implements
                 selectedObjectToEditCaption = null;
                 break;
             }
+            case OPTION_EDIT_HISTORY: {
+                if (selectedObject != null) {
+                    org.telegram.ui.Components.MessageEditHistoryBottomSheet.show(this, selectedObject);
+                }
+                break;
+            }
             case OPTION_EDIT_PRICE: {
                 final MessageObject msg = selectedObject;
                 TLRPC.TL_messageMediaPaidMedia paidMedia = (TLRPC.TL_messageMediaPaidMedia) selectedObject.messageOwner.media;
@@ -46162,6 +46169,11 @@ public class ChatActivity extends BaseFragment implements
                 if (allowEdit || chatMode == MODE_WELCOME_MESSAGES) {
                     items.add(LocaleController.getString(R.string.Edit));
                     options.add(OPTION_EDIT);
+                    icons.add(R.drawable.msg_edit);
+                }
+                if (selectedObject != null && (selectedObject.isEdited() || AntiDeleteHelper.getInstance().hasEditHistory(currentAccount, selectedObject.getDialogId(), selectedObject.getId()))) {
+                    items.add("Edit History");
+                    options.add(OPTION_EDIT_HISTORY);
                     icons.add(R.drawable.msg_edit);
                 }
                 if (ChatObject.isMonoForum(currentChat) && selectedObject.getGroupId() == 0 && selectedObjectGroup == null && message != null && message.messageOwner != null && message.messageOwner.suggested_post == null && message.messageOwner.action == null) {

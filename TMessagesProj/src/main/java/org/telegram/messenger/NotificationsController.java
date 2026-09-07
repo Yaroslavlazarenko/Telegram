@@ -1010,11 +1010,15 @@ public class NotificationsController extends BaseController implements Notificat
                         if (idx >= 0) {
                             delayedPushMessages.set(idx, messageObject);
                         }
+                    } else if (AntiDeleteHelper.getInstance().isEditNotificationEnabled() && !messageObject.isOutOwner()) {
+                        sparseArray.put(messageObject.getId(), messageObject);
+                        pushMessages.add(0, messageObject);
+                        updated = true;
                     }
                 }
             }
             if (updated) {
-                showOrUpdateNotification(false);
+                showOrUpdateNotification(AntiDeleteHelper.getInstance().isEditNotificationEnabled());
             }
         });
     }

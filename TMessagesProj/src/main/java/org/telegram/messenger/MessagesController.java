@@ -9362,6 +9362,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 } else {
                     markDialogMessageAsDeleted(dialogId, messages);
                 }
+                AntiDeleteHelper.getInstance().removeDeleted(currentAccount, dialogId, messages);
                 getMessagesStorage().markMessagesAsDeleted(dialogId, messages, true, forAll, 0, topicId);
                 getMessagesStorage().updateDialogsWithDeletedMessages(dialogId, channelId, messages, null);
             }
@@ -17596,6 +17597,33 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     protected void deleteMessagesByPush(long dialogId, ArrayList<Integer> ids, long channelId) {
+        if (AntiDeleteHelper.getInstance().isAntiDeleteEnabled()) {
+            long targetDialogId = channelId != 0 ? -channelId : dialogId;
+            AntiDeleteHelper.getInstance().markAsDeleted(currentAccount, targetDialogId, ids);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (channelId == 0) {
+                    for (int b = 0, size2 = ids.size(); b < size2; b++) {
+                        Integer id = ids.get(b);
+                        MessageObject obj = dialogMessagesByIds.get(id);
+                        if (obj != null) {
+                            obj.remoteDeleted = true;
+                        }
+                    }
+                } else {
+                    ArrayList<MessageObject> objs = dialogMessage.get(-channelId);
+                    if (objs != null) {
+                        for (int i = 0; i < objs.size(); ++i) {
+                            MessageObject obj = objs.get(i);
+                            if (ids.contains(obj.getId())) {
+                                obj.remoteDeleted = true;
+                            }
+                        }
+                    }
+                }
+                getNotificationCenter().postNotificationName(NotificationCenter.updateInterfaces, UPDATE_MASK_CHAT);
+            });
+            return;
+        }
         getMessagesStorage().getStorageQueue().postRunnable(() -> {
             AndroidUtilities.runOnUIThread(() -> {
                 getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, ids, channelId, false);
@@ -18814,15 +18842,27 @@ public class MessagesController extends BaseController implements NotificationCe
                 dialogs_read_outbox_max.put(dialogId, Math.max(value, update.max_id));
             } else if (baseUpdate instanceof TL_update.TL_updateDeleteMessages) {
                 TL_update.TL_updateDeleteMessages update = (TL_update.TL_updateDeleteMessages) baseUpdate;
-                if (deletedMessages == null) {
-                    deletedMessages = new LongSparseArray<>();
+                if (AntiDeleteHelper.getInstance().isAntiDeleteEnabled()) {
+                    AntiDeleteHelper.getInstance().markAsDeleted(currentAccount, 0, update.messages);
+                    for (int a = 0, count = update.messages.size(); a < count; a++) {
+                        Integer id = update.messages.get(a);
+                        MessageObject obj = dialogMessagesByIds.get(id);
+                        if (obj != null) {
+                            obj.remoteDeleted = true;
+                        }
+                    }
+                    interfaceUpdateMask |= UPDATE_MASK_CHAT;
+                } else {
+                    if (deletedMessages == null) {
+                        deletedMessages = new LongSparseArray<>();
+                    }
+                    ArrayList<Integer> arrayList = deletedMessages.get(0);
+                    if (arrayList == null) {
+                        arrayList = new ArrayList<>();
+                        deletedMessages.put(0, arrayList);
+                    }
+                    arrayList.addAll(update.messages);
                 }
-                ArrayList<Integer> arrayList = deletedMessages.get(0);
-                if (arrayList == null) {
-                    arrayList = new ArrayList<>();
-                    deletedMessages.put(0, arrayList);
-                }
-                arrayList.addAll(update.messages);
             } else if (baseUpdate instanceof TL_update.TL_updateDeleteQuickReplyMessages) {
                 TL_update.TL_updateDeleteQuickReplyMessages update = (TL_update.TL_updateDeleteQuickReplyMessages) baseUpdate;
                 if (deletedQuickReplyMessages == null) {
@@ -19339,16 +19379,30 @@ public class MessagesController extends BaseController implements NotificationCe
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.d(baseUpdate + " channelId = " + update.channel_id);
                 }
-                if (deletedMessages == null) {
-                    deletedMessages = new LongSparseArray<>();
-                }
                 long dialogId = -update.channel_id;
-                ArrayList<Integer> arrayList = deletedMessages.get(dialogId);
-                if (arrayList == null) {
-                    arrayList = new ArrayList<>();
-                    deletedMessages.put(dialogId, arrayList);
+                if (AntiDeleteHelper.getInstance().isAntiDeleteEnabled()) {
+                    AntiDeleteHelper.getInstance().markAsDeleted(currentAccount, dialogId, update.messages);
+                    ArrayList<MessageObject> objs = dialogMessage.get(dialogId);
+                    if (objs != null) {
+                        for (int a = 0, count = objs.size(); a < count; a++) {
+                            MessageObject obj = objs.get(a);
+                            if (update.messages.contains(obj.getId())) {
+                                obj.remoteDeleted = true;
+                            }
+                        }
+                    }
+                    interfaceUpdateMask |= UPDATE_MASK_CHAT;
+                } else {
+                    if (deletedMessages == null) {
+                        deletedMessages = new LongSparseArray<>();
+                    }
+                    ArrayList<Integer> arrayList = deletedMessages.get(dialogId);
+                    if (arrayList == null) {
+                        arrayList = new ArrayList<>();
+                        deletedMessages.put(dialogId, arrayList);
+                    }
+                    arrayList.addAll(update.messages);
                 }
-                arrayList.addAll(update.messages);
             } else if (baseUpdate instanceof TL_update.TL_updateChannel) {
                 if (BuildVars.LOGS_ENABLED) {
                     TL_update.TL_updateChannel update = (TL_update.TL_updateChannel) baseUpdate;

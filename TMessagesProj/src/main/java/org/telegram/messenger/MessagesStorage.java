@@ -12586,6 +12586,24 @@ public class MessagesStorage extends BaseController {
                     if (message.local_id != 0) {
                         messageId = message.local_id;
                     }
+                    if (message.edit_date != 0 && AntiDeleteHelper.getInstance().isEditHistoryEnabled()) {
+                        try {
+                            SQLiteCursor oldCursor = database.queryFinalized(String.format(Locale.US, "SELECT data FROM messages_v2 WHERE mid = %d AND uid = %d LIMIT 1", messageId, message.dialog_id));
+                            if (oldCursor.next()) {
+                                NativeByteBuffer oldData = oldCursor.byteBufferValue(0);
+                                if (oldData != null) {
+                                    TLRPC.Message oldMsg = TLRPC.Message.TLdeserialize(oldData, oldData.readInt32(false), false);
+                                    oldData.reuse();
+                                    if (oldMsg != null && !TextUtils.isEmpty(oldMsg.message) && !TextUtils.equals(oldMsg.message, message.message)) {
+                                        AntiDeleteHelper.getInstance().saveEditHistory(currentAccount, message.dialog_id, messageId, oldMsg.date, oldMsg.message);
+                                    }
+                                }
+                            }
+                            oldCursor.dispose();
+                        } catch (Throwable e) {
+                            FileLog.e(e);
+                        }
+                    }
                     MessageObject.normalizeFlags(message);
                     NativeByteBuffer data = new NativeByteBuffer(message.getObjectSize());
                     message.serializeToStream(data);
