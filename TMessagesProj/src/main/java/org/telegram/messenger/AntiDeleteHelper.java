@@ -103,7 +103,13 @@ public class AntiDeleteHelper {
         if (!isAntiDeleteEnabled()) {
             return false;
         }
-        return deletedCache.containsKey(getMessageKey(account, dialogId, messageId));
+        if (deletedCache.containsKey(getMessageKey(account, dialogId, messageId))) {
+            return true;
+        }
+        if (dialogId != 0 && deletedCache.containsKey(getMessageKey(account, 0, messageId))) {
+            return true;
+        }
+        return false;
     }
 
     public void markAsDeleted(int account, long dialogId, ArrayList<Integer> messageIds) {
@@ -144,12 +150,15 @@ public class AntiDeleteHelper {
         }
         for (int mid : messageIds) {
             deletedCache.remove(getMessageKey(account, dialogId, mid));
+            if (dialogId != 0) {
+                deletedCache.remove(getMessageKey(account, 0, mid));
+            }
         }
         Utilities.globalQueue.postRunnable(() -> {
             try {
                 SQLiteDatabase db = dbHelper.getWritableDatabase();
                 for (int mid : messageIds) {
-                    db.delete("deleted_messages", "account = ? AND dialog_id = ? AND message_id = ?",
+                    db.delete("deleted_messages", "account = ? AND (dialog_id = ? OR dialog_id = 0) AND message_id = ?",
                             new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(mid)});
                 }
             } catch (Throwable e) {
@@ -180,6 +189,9 @@ public class AntiDeleteHelper {
                 list.add(new EditEntry(date, oldText));
             }
         }
+        if (dialogId != 0) {
+            editsCache.put(getMessageKey(account, 0, messageId), list);
+        }
 
         Utilities.globalQueue.postRunnable(() -> {
             try {
@@ -203,9 +215,15 @@ public class AntiDeleteHelper {
         if (list != null && !list.isEmpty()) {
             return true;
         }
+        if (dialogId != 0) {
+            ArrayList<EditEntry> list0 = editsCache.get(getMessageKey(account, 0, messageId));
+            if (list0 != null && !list0.isEmpty()) {
+                return true;
+            }
+        }
         try {
             SQLiteDatabase db = dbHelper.getReadableDatabase();
-            Cursor cursor = db.rawQuery("SELECT 1 FROM message_edits WHERE account = ? AND dialog_id = ? AND message_id = ? LIMIT 1",
+            Cursor cursor = db.rawQuery("SELECT 1 FROM message_edits WHERE account = ? AND (dialog_id = ? OR dialog_id = 0) AND message_id = ? LIMIT 1",
                     new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(messageId)});
             boolean has = false;
             if (cursor != null) {
@@ -225,14 +243,18 @@ public class AntiDeleteHelper {
         if (list != null && !list.isEmpty()) {
             return new ArrayList<>(list);
         }
+        if (dialogId != 0) {
+            ArrayList<EditEntry> list0 = editsCache.get(getMessageKey(account, 0, messageId));
+            if (list0 != null && !list0.isEmpty()) {
+                return new ArrayList<>(list0);
+            }
+        }
 
         ArrayList<EditEntry> result = new ArrayList<>();
         try {
             SQLiteDatabase db = dbHelper.getReadableDatabase();
-            Cursor cursor = db.query("message_edits", new String[]{"date", "text"},
-                    "account = ? AND dialog_id = ? AND message_id = ?",
-                    new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(messageId)},
-                    null, null, "date ASC");
+            Cursor cursor = db.rawQuery("SELECT date, text FROM message_edits WHERE account = ? AND (dialog_id = ? OR dialog_id = 0) AND message_id = ? ORDER BY date ASC",
+                    new String[]{String.valueOf(account), String.valueOf(dialogId), String.valueOf(messageId)});
             if (cursor != null) {
                 while (cursor.moveToNext()) {
                     long date = cursor.getLong(0);
@@ -243,6 +265,9 @@ public class AntiDeleteHelper {
             }
             if (!result.isEmpty()) {
                 editsCache.put(key, new ArrayList<>(result));
+                if (dialogId != 0) {
+                    editsCache.put(getMessageKey(account, 0, messageId), new ArrayList<>(result));
+                }
             }
         } catch (Throwable e) {
             FileLog.e(e);

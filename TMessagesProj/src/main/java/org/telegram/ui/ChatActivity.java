@@ -22264,6 +22264,32 @@ public class ChatActivity extends BaseFragment implements
             }
             ArrayList<Integer> markAsDeletedMessages = (ArrayList<Integer>) args[0];
             long channelId = (Long) args[1];
+            if (AntiDeleteHelper.getInstance().isAntiDeleteEnabled() && markAsDeletedMessages != null) {
+                ArrayList<Integer> reallyDelete = new ArrayList<>();
+                boolean markedAny = false;
+                for (int msg_id : markAsDeletedMessages) {
+                    if (AntiDeleteHelper.getInstance().isDeleted(currentAccount, dialog_id, msg_id)) {
+                        for (int a = 0; a < 2; a++) {
+                            if (messagesDict[a] != null) {
+                                MessageObject msg = messagesDict[a].get(msg_id);
+                                if (msg != null) {
+                                    msg.remoteDeleted = true;
+                                    markedAny = true;
+                                }
+                            }
+                        }
+                    } else {
+                        reallyDelete.add(msg_id);
+                    }
+                }
+                if (markedAny) {
+                    updateVisibleRows();
+                }
+                if (reallyDelete.isEmpty()) {
+                    return;
+                }
+                markAsDeletedMessages = reallyDelete;
+            }
             boolean update = args.length > 2 && (boolean) args[2];
             boolean sent = args.length > 3 && (boolean) args[3];
             int scheduledMessageId = args.length > 5 ? (int) args[5] : 0;

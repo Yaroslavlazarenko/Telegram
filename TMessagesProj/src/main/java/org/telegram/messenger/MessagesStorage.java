@@ -16297,6 +16297,10 @@ public class MessagesStorage extends BaseController {
                                     TLRPC.Message oldMessage = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                                     oldMessage.readAttachPath(data, getUserConfig().clientUserId);
                                     data.reuse();
+                                    if (AntiDeleteHelper.getInstance().isEditHistoryEnabled() && oldMessage != null && !TextUtils.isEmpty(oldMessage.message) && !TextUtils.equals(oldMessage.message, message.message)) {
+                                        long editDate = oldMessage.edit_date != 0 ? oldMessage.edit_date : oldMessage.date;
+                                        AntiDeleteHelper.getInstance().saveEditHistory(currentAccount, MessageObject.getDialogId(message), message.id, editDate, oldMessage.message);
+                                    }
                                     if (reactionUpdates != null) {
                                         reactionUpdates.add(new SavedReactionsUpdate(selfId, oldMessage, message));
                                     }

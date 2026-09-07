@@ -104,6 +104,7 @@ import androidx.core.math.MathUtils;
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.AntiDeleteHelper;
 import org.telegram.messenger.AppGlobalConfig;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BotForumHelper;
@@ -18604,7 +18605,8 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         } else {
             currentTimeString = timeString;
         }
-        if (currentMessageObject != null && currentMessageObject.remoteDeleted) {
+        if (currentMessageObject != null && (currentMessageObject.remoteDeleted || AntiDeleteHelper.getInstance().isDeleted(currentAccount, currentMessageObject.getDialogId(), currentMessageObject.getId()))) {
+            currentMessageObject.remoteDeleted = true;
             currentTimeString = TextUtils.concat("🗑 ", currentTimeString);
         }
         if (currentMessageObject.isStakedDice()) {
