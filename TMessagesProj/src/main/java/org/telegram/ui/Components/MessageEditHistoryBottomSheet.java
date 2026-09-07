@@ -54,7 +54,7 @@ public class MessageEditHistoryBottomSheet extends BottomSheetWithRecyclerListVi
 
     @Override
     protected RecyclerListView.SelectionAdapter createAdapter(RecyclerListView listView) {
-        adapter = new UniversalAdapter(listView, getContext(), currentAccount, 0, this::fillItems, getResourceProvider());
+        adapter = new UniversalAdapter(listView, getContext(), currentAccount, 0, this::fillItems, resourcesProvider);
         return adapter;
     }
 
@@ -71,14 +71,14 @@ public class MessageEditHistoryBottomSheet extends BottomSheetWithRecyclerListVi
         }
         int editDate = messageObject.messageOwner != null ? messageObject.messageOwner.edit_date : 0;
         String currentDateStr = editDate != 0 ? LocaleController.formatDateAudio(editDate, true) : "Current";
-        items.add(UItem.asCustom(new VersionCell(getContext(), "Current: " + currentDateStr, currentText, getResourceProvider())));
+        items.add(UItem.asCustom(new VersionCell(getContext(), "Current: " + currentDateStr, currentText, resourcesProvider)));
 
         // Previous Versions (reversed so most recent edit is top)
         if (history != null && !history.isEmpty()) {
             for (int i = history.size() - 1; i >= 0; i--) {
                 AntiDeleteHelper.EditEntry entry = history.get(i);
                 String dateStr = entry.date != 0 ? LocaleController.formatDateAudio(entry.date, true) : "Version " + (i + 1);
-                items.add(UItem.asCustom(new VersionCell(getContext(), dateStr, entry.text, getResourceProvider())));
+                items.add(UItem.asCustom(new VersionCell(getContext(), dateStr, entry.text, resourcesProvider)));
             }
         }
 

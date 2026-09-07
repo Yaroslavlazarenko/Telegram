@@ -181,7 +181,14 @@ public class GeminiTranscribeHelper {
         Utilities.globalQueue.postRunnable(() -> {
             String apiKey = getApiKey();
             if (TextUtils.isEmpty(apiKey)) {
-                handleSummaryError(key, "STT API Key not configured. Go to Settings -> Speech Recognition (STT)");
+                AndroidUtilities.runOnUIThread(() -> {
+                    synchronized (loadingSummaries) {
+                        loadingSummaries.remove(key);
+                    }
+                    if (callback != null) {
+                        callback.onError("STT API Key not configured. Go to Settings -> Speech Recognition (STT)");
+                    }
+                });
                 return;
             }
             String baseUrl = getBaseUrl();
