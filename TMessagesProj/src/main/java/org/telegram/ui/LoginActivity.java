@@ -3144,6 +3144,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                     FileLog.e(e);
                 }
             }
+            settings.current_number = true;
+            settings.unknown_number = false;
 
             TLObject req;
             if (activityMode == MODE_CHANGE_PHONE_NUMBER) {
